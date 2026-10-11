@@ -1,0 +1,27 @@
+# The two ONNX encoders (87 MB and 70 MB) are committed as ordinary git blobs.
+# Both are under GitHub's 100 MB per-file hard limit, so no Git LFS is required —
+# `git clone` just downloads them. GitHub will print a >50 MB advisory on push.
+#
+# They are immutable release artefacts, so history will not grow from them. If a
+# future model ever exceeds 100 MB, or you simply prefer LFS, convert with:
+#
+#   git lfs install
+#   git lfs track "*.onnx" "*.so"
+#   git lfs migrate import --include="*.onnx,*.so" --everything   # rewrites history
+#   git push --force-with-lease
+#
+# (That rewrite changes every commit hash, so coordinate it with anyone who has cloned.)
+
+# treat the binary artefacts as binary: no diffing, no eol munging
+*.onnx binary
+*.so binary
+*.pkl binary
+*.ckpt binary
+*.png binary
+*.bin binary
+
+# normalise line endings for text
+*.py text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf

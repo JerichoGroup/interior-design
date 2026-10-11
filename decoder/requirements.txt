@@ -1,0 +1,30 @@
+# Decode-only dependency subset of AEIC/requirements.txt.
+# Target env: Python 3.10, NVIDIA CUDA 12.1. Recommended:
+#   conda create -n aeic python=3.10 && conda activate aeic
+#   pip install -r requirements.txt
+# torch 2.1.2 must be the CUDA build; if pip pulls a CPU wheel, install it from:
+#   pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu121
+
+torch==2.1.2
+torchvision==0.16.2
+
+# diffusers MUST stay 0.25.1 — base_model.py imports private 0.25.1-only module paths
+# (diffusers.models.unet_2d_blocks / transformer_2d / resnet). Other versions break.
+diffusers==0.25.1
+transformers==4.46.3
+accelerate==1.9.0
+huggingface_hub==0.25.0
+peft==0.19.1
+
+einops>=0.6.1
+scipy
+numpy>=1.24.4
+pillow>=9.5.0
+tqdm>=4.65.0
+
+# Optional but recommended (matches the trained env; speeds up the UNet):
+xformers==0.0.23.post1
+triton==2.1.0
+
+# Used only by setup.sh to fetch the Drive checkpoints:
+gdown

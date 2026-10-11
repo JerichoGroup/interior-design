@@ -1,0 +1,47 @@
+# Trimmed version of environment.yml: only what this workspace actually imports
+# (verified by grepping the imports of decoder/, encoder/ and benchmark/), at the
+# versions the working `aeic` env has. Use this to build a fresh box; use
+# environment.yml if you want a faithful clone of the machine's env.
+#
+#   conda env create -f environment-minimal.yml
+#   conda activate aeic-min
+#
+# Same hard constraints as environment.yml: python 3.10 (the prebuilt rANS .so is
+# cpython-310-x86_64), diffusers exactly 0.25.1, and torch 2.1.2 as the cu121 build.
+# If pip resolves a CPU-only torch, the decoder silently runs on CPU — reinstall with
+#   pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu121
+name: aeic-min
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      # --- encoder half (CPU only: ONNX + numpy rANS) -----------------------
+      - numpy==1.26.4
+      - pillow==10.4.0
+      - onnxruntime==1.23.2          # use onnxruntime-gpu for the CUDA provider
+      - onnx==1.21.0                 # benchmark/encoder_flops.py reads the graph
+
+      # --- decoder half (NVIDIA GPU: diffusion + tiled VAE) -----------------
+      - torch==2.1.2
+      - torchvision==0.16.2
+      - diffusers==0.25.1            # MUST be 0.25.1 (private module paths)
+      - transformers==4.46.3
+      - accelerate==1.9.0
+      - huggingface-hub==0.25.0
+      - peft==0.19.1
+      - einops==0.8.2
+      - scipy==1.11.1
+      - tqdm==4.68.1
+      - xformers==0.0.23.post1       # optional, CUDA-only; speeds up the UNet
+      - triton==2.1.0
+
+      # --- benchmark/ metrics only (skip if you just encode and decode) -----
+      - pytorch-msssim==1.0.0
+      - lpips==0.1.4
+      - dists-pytorch==0.1
+      - torch-fidelity==0.4.0        # FID / KID
+
+      # --- setup.sh only, to re-fetch the Drive checkpoints -----------------
+      - gdown

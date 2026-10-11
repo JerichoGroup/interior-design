@@ -1,0 +1,27 @@
+# --- model weights: 4.4 GB, fetched by decoder/setup.sh, never committed ---------
+decoder/weights/*
+!decoder/weights/.gitkeep
+
+# --- pipeline outputs ------------------------------------------------------------
+encoded/*
+!encoded/.gitkeep
+decoded/*
+!decoded/.gitkeep
+
+# --- build artefacts from rebuilding the rANS extension --------------------------
+decoder/cpp_build/
+*.o
+*.a
+
+# --- python ----------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# --- editors / OS ----------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+*.swp
