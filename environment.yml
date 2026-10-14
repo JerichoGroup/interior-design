@@ -22,7 +22,7 @@
 # This is a superset: the env also carries packages from unrelated work (gradio,
 # streamlit, pyiqa, ...). environment-minimal.yml is the trimmed version that only
 # lists what encode + decode + the benchmarks actually import.
-name: aeic
+name: aeic-max
 channels:
   - conda-forge
   - defaults

@@ -1,0 +1,13 @@
+# Keep the build context small: weights and pipeline data are mounted at runtime.
+.git
+decoder/weights/*
+original/*
+encoded/*
+decoded/*
+decoder/cpp_build/
+**/__pycache__
+**/*.py[cod]
+.venv/
+venv/
+.vscode/
+.idea/
