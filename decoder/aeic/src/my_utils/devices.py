@@ -57,8 +57,12 @@ def enable_tf32():
         if any(torch.cuda.get_device_capability(devid) == (7, 5) for devid in range(0, torch.cuda.device_count())):
             torch.backends.cudnn.benchmark = True
 
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
+        # TF32 must stay OFF. The entropy model / decoder is precision-sensitive: on
+        # Ampere+ GPUs (A5000, A100, RTX 30xx/40xx) TF32 drops the decoded PSNR from
+        # ~30 dB to ~19 dB (visibly corrupted output). Pre-Ampere cards (e.g. Turing
+        # Quadro RTX 6000) have no TF32 hardware, which is why they decoded fine.
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
 
 
 enable_tf32()
