@@ -101,8 +101,8 @@ setup.sh             optional: re-fetch weights if deleted
 
 It decodes any AEIC `.bin` — whether produced by `run_onnx_npy.py` on the desktop or by the
 Android encoder app on the phone. The latent grid is taken from the `.bin` header, so the
-same decoder handles the 2048×2048, 2048×1536 and (encoder `-hd`) 1024×768 shapes with no
-flag or model change on this side.
+same decoder handles the 2048×2048 and 2048×1536 shapes and the encoder's `-fhd` (1472×1088),
+`-hd` (1024×768) and `-sd` (640×512) canvases with no flag or model change on this side.
 
 ---
 

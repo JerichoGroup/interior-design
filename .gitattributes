@@ -1,5 +1,5 @@
-# The two ONNX encoders (87 MB and 70 MB) are committed as ordinary git blobs.
-# Both are under GitHub's 100 MB per-file hard limit, so no Git LFS is required —
+# The four ONNX encoders (87, 76, 70 and 67 MB) are committed as ordinary git blobs.
+# All are under GitHub's 100 MB per-file hard limit, so no Git LFS is required —
 # `git clone` just downloads them. GitHub will print a >50 MB advisory on push.
 #
 # They are immutable release artefacts, so history will not grow from them. If a

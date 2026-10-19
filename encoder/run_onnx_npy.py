@@ -11,11 +11,15 @@ It does two things:
      tensors to write the actual compressed .bin. Byte-identical to the project's reference
      encoder and the Android app's output. Use --no-encode to run only the model (no .bin).
 
-Two canvases (the ONNX encoders are fixed-shape, so each canvas is its own model file):
+Canvases (the ONNX encoders are fixed-shape, so each canvas is its own model file):
     default   2048x1536 ("2K")  -> aeic_se_ft2_encoder_2048x1536.onnx
+    -fhd      1440x1080 ("FHD") -> aeic_se_ft2_encoder_1472x1088.onnx  (edge-padded canvas)
     -hd       1024x768  ("HD")  -> aeic_se_ft2_encoder_1024x768.onnx
-The HD canvas is a quarter of the pixels: ~4x smaller .bin, ~4x less encoder RAM/time, same
-bpp-vs-canvas operating point (the decoder upscales back to the original size via the sidecar).
+    -sd       640x480   ("SD")  -> aeic_se_ft2_encoder_640x512.onnx    (edge-padded canvas)
+Canvases must be multiples of 64 (decoder latent-grid rule), so SD/FHD content is padded
+right/bottom and the sidecar tells the decoder to crop it off.
+Smaller canvases mean a smaller .bin and less encoder RAM/time at lower fidelity (the
+decoder upscales back to the original size via the sidecar).
 The decoder needs no flag — it reads the canvas from the .bin header.
 
 Inputs (../original/): a preprocessed .npy ([1,3,H,W], float32, [0,1], matching the chosen
@@ -27,6 +31,8 @@ Usage:
     python run_onnx_npy.py                              # encodes ../original/input_2048x1536.png
     python run_onnx_npy.py -i photo.jpg -o myshot       # ../original/photo.jpg -> ../encoded/myshot.bin
     python run_onnx_npy.py -hd -i photo.jpg -o myshot   # same, on the 1024x768 canvas
+    python run_onnx_npy.py -sd  -i photo.jpg -o myshot  # 640x480 canvas
+    python run_onnx_npy.py -fhd -i photo.jpg -o myshot  # 1440x1080 canvas
     python run_onnx_npy.py --input /abs/path.png -o out
     python run_onnx_npy.py --provider cpu               # force CPU (default: auto)
     python run_onnx_npy.py --no-encode                  # model only, no .bin
@@ -45,12 +51,24 @@ ORIGINAL_DIR = os.path.join(WORKSPACE, "original")
 ENCODED_DIR = os.path.join(WORKSPACE, "encoded")
 
 # The ONNX encoders are fixed-shape: one model file per canvas. (W, H) -> model.
+# Model canvases must be multiples of 64: the decoder derives the latent grid as
+# ceil(H/64)*2 x ceil(W/64)*2, so anything else desyncs the rANS stream.
 CANVAS_2K = (2048, 1536)                                 # default
+CANVAS_FHD = (1472, 1088)                                # -fhd (1440x1080 content, padded)
 CANVAS_HD = (1024, 768)                                  # -hd
+CANVAS_SD = (640, 512)                                   # -sd  (640x480 content, padded)
 MODELS = {
     CANVAS_2K: os.path.join(HERE, "aeic_se_ft2_encoder_2048x1536.onnx"),
+    CANVAS_FHD: os.path.join(HERE, "aeic_se_ft2_encoder_1472x1088.onnx"),
     CANVAS_HD: os.path.join(HERE, "aeic_se_ft2_encoder_1024x768.onnx"),
+    CANVAS_SD: os.path.join(HERE, "aeic_se_ft2_encoder_640x512.onnx"),
 }
+# Image content size (W, H) per canvas, where it differs from the canvas: the image is
+# resized to the content size and edge-padded right/bottom to the canvas; the sidecar's
+# contentW/contentH make the decoder crop the padding off.
+CONTENT = {CANVAS_FHD: (1440, 1080), CANVAS_SD: (640, 480)}
+# flag -> canvas
+FLAG_CANVAS = {"sd": CANVAS_SD, "hd": CANVAS_HD, "fhd": CANVAS_FHD}
 DEFAULT_CDF = os.path.join(HERE, "aeic_ft2_cdf.bin")
 DEFAULT_INPUT = os.path.join(ORIGINAL_DIR, "input_2048x1536.png")
 DEFAULT_MODEL = MODELS[CANVAS_2K]        # kept for the benchmark/ scripts that import it
@@ -66,16 +84,18 @@ def resolve_input(value):
     return value  # let the caller report the not-found error
 
 
-def load_input(path, canvas=CANVAS_2K):
+def load_input(path, canvas=CANVAS_2K, content=None):
     """Return (x [1,3,H,W] float32 in [0,1], sidecar dict) for canvas=(W, H).
 
     Defaults to the 2048x1536 canvas (what benchmark/ imports expect); the CLI passes the
-    canvas read from the model, so `-hd` resizes to 1024x768 instead.
+    canvas read from the model, so `-sd/-hd/-fhd` resize to their canvas instead.
 
     .npy  -> used as-is (must already be the model's input shape).
-    image -> EXIF-upright, rotate portrait->landscape (orientation=90), resize to the canvas.
+    image -> EXIF-upright, rotate portrait->landscape (orientation=90), resize to `content`
+             (W, H; default = canvas), then edge-pad right/bottom up to the canvas.
     """
     cw, ch = canvas
+    tw, th = content or canvas
     ext = os.path.splitext(path)[1].lower()
     if ext == ".npy":
         x = np.load(path, allow_pickle=False)
@@ -91,13 +111,16 @@ def load_input(path, canvas=CANVAS_2K):
     if orig_h > orig_w:                      # portrait -> landscape (decoder rotates back)
         im = im.rotate(90, expand=True)
         orientation = 90
-    if im.size != (cw, ch):
-        print(f"resizing {im.size[0]}x{im.size[1]} -> {cw}x{ch} for the fixed-shape model")
-        im = im.resize((cw, ch), Image.LANCZOS)
+    if im.size != (tw, th):
+        print(f"resizing {im.size[0]}x{im.size[1]} -> {tw}x{th} for the fixed-shape model")
+        im = im.resize((tw, th), Image.LANCZOS)
     arr = np.asarray(im, np.float32) / 255.0
+    if (tw, th) != (cw, ch):                 # replicate-pad up to the model canvas
+        print(f"padding {tw}x{th} -> {cw}x{ch} (edge replicate; decoder crops it off)")
+        arr = np.pad(arr, ((0, ch - th), (0, cw - tw), (0, 0)), mode="edge")
     x = np.ascontiguousarray(arr.transpose(2, 0, 1)[None])   # HWC -> [1,3,H,W]
     sidecar = {"orientation": orientation, "origW": orig_w, "origH": orig_h,
-               "contentW": cw, "contentH": ch}
+               "contentW": tw, "contentH": th}
     return x, sidecar
 
 
@@ -105,10 +128,17 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", default=None,
                     help="path to the .onnx encoder (default: the model for the chosen canvas)")
-    ap.add_argument("-hd", "--hd", dest="hd", action="store_true",
-                    help="encode on the 1024x768 canvas instead of 2048x1536 "
-                         "(a quarter of the pixels: ~2.5x smaller .bin, ~4x less "
-                         "encoder RAM/compute, lower fidelity)")
+    size = ap.add_mutually_exclusive_group()
+    size.add_argument("-sd", "--sd", dest="size", action="store_const", const="sd",
+                      help="encode 640x480 content (SD; model canvas 640x512, "
+                           "32 rows of edge padding the decoder crops off)")
+    size.add_argument("-hd", "--hd", dest="size", action="store_const", const="hd",
+                      help="encode on the 1024x768 canvas instead of 2048x1536 "
+                           "(a quarter of the pixels: ~2.5x smaller .bin, ~4x less "
+                           "encoder RAM/compute, lower fidelity)")
+    size.add_argument("-fhd", "--fhd", dest="size", action="store_const", const="fhd",
+                      help="encode 1440x1080 FullHD content (model canvas 1472x1088, "
+                           "edge padding the decoder crops off)")
     ap.add_argument("-i", "--input", "--npy", dest="input", default=DEFAULT_INPUT,
                     help="input image/.npy (path, or a bare name looked up in ../original/)")
     ap.add_argument("-o", "--output", default=None,
@@ -126,7 +156,7 @@ def main() -> int:
                     help="entropy tables (default: aeic_ft2_cdf.bin in this folder)")
     args = ap.parse_args()
 
-    canvas = CANVAS_HD if args.hd else CANVAS_2K
+    canvas = FLAG_CANVAS.get(args.size, CANVAS_2K)
     model_path = args.model or MODELS[canvas]
 
     try:
@@ -156,7 +186,7 @@ def main() -> int:
         providers = None  # onnxruntime default order
 
     print(f"\nmodel: {model_path}  (canvas {canvas[0]}x{canvas[1]}"
-          f"{', -hd' if args.hd else ''})")
+          f"{', -' + args.size if args.size else ''})")
     sess = ort.InferenceSession(model_path, providers=providers)
     print(f"using providers: {sess.get_providers()}")
 
@@ -177,7 +207,7 @@ def main() -> int:
             canvas = model_canvas
 
     # --- 3. Load + preprocess the input -------------------------------------
-    x, sidecar = load_input(in_path, canvas)
+    x, sidecar = load_input(in_path, canvas, CONTENT.get(canvas))
     print(f"\nloaded input: {in_path}\n  tensor shape={x.shape} dtype={x.dtype} "
           f"min={float(x.min()):.4f} max={float(x.max()):.4f}  sidecar={sidecar}")
 
@@ -197,7 +227,7 @@ def main() -> int:
             if os.path.splitext(in_path)[1].lower() == ".npy":
                 print("hint: a .npy input is used as-is, so it must already match the "
                       "model's canvas. Pass an image instead (it is resized for you), or "
-                      f"{'drop' if args.hd else 'add'} -hd to pick the matching model.",
+                      "pick the matching model with -sd/-hd/-fhd (or none for 2K).",
                       file=sys.stderr)
             return 3
     x = np.ascontiguousarray(x)

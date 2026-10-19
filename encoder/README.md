@@ -10,6 +10,9 @@ python run_onnx_npy.py -i input_2048x1536.png -o myshot --provider cpu
 
 python run_onnx_npy.py -hd -i input_2048x1536.png -o myshot_hd --provider cpu
 #   same, but on the 1024x768 canvas (quarter the pixels)
+
+python run_onnx_npy.py -fhd -i input_2048x1536.png -o myshot_fhd --provider cpu   # 1440x1080
+python run_onnx_npy.py -sd  -i input_2048x1536.png -o myshot_sd  --provider cpu   # 640x480
 ```
 
 - `-i/--input`: a path, or a bare filename looked up in `../original/`. Accepts a preprocessed
@@ -18,34 +21,47 @@ python run_onnx_npy.py -hd -i input_2048x1536.png -o myshot_hd --provider cpu
   original size/orientation saved in the sidecar so the decoder restores it.
 - `-o/--output`: the result name → `../encoded/<name>.bin` (+ `.json`). Omit it to reuse the
   input's name. `--encoded-dir` changes the destination.
-- `-hd`: use the **1024×768** canvas (and its model file) instead of 2048×1536. See
-  [Canvases](#canvases-default-2k-vs--hd) below.
+- `-fhd` / `-hd` / `-sd`: encode at **1440×1080** / **1024×768** / **640×480** (each
+  has its own model file) instead of 2048×1536. Use at most one. See [Canvases](#canvases) below.
+- `--provider {auto,cpu,gpu}`: onnxruntime execution provider (default `auto`).
+- `--model PATH`: use a specific `.onnx`; its input shape overrides the size flag.
+- `--cdf PATH`: entropy tables (default `aeic_ft2_cdf.bin` in this folder).
 - `--no-encode`: run only the model (RAM test), no `.bin`.
 
-## Canvases: default 2K vs `-hd`
+## Canvases
 
 The ONNX encoders are **fixed-shape**, so each canvas is a separate model file exported from the
 same `AEIC_SE_ft2.pkl` checkpoint. The flag picks the model and the resize target:
 
-| | default | `-hd` |
-|---|---|---|
-| Canvas (W×H) | 2048×1536 | 1024×768 |
-| Model | `aeic_se_ft2_encoder_2048x1536.onnx` (87 MB) | `aeic_se_ft2_encoder_1024x768.onnx` (70 MB) |
-| Latents | `z [1,128,12,16]`, 8× `[1,256,48,64]` | `z [1,128,6,8]`, 8× `[1,256,24,32]` |
-| `.bin` for the bundled test image | 10 840 B (0.0276 bpp) | 4 306 B (0.0110 bpp) |
-| PSNR vs the 2K source | 30.10 dB | 26.65 dB |
+| | default (2K) | `-fhd` | `-hd` | `-sd` |
+|---|---|---|---|---|
+| Content (W×H) | 2048×1536 | 1440×1080 | 1024×768 | 640×480 |
+| Model canvas | 2048×1536 | 1472×1088 | 1024×768 | 640×512 |
+| Model | `…_2048x1536.onnx` (87 MB) | `…_1472x1088.onnx` (76 MB) | `…_1024x768.onnx` (70 MB) | `…_640x512.onnx` (67 MB) |
+| Latents | `z [1,128,12,16]`, `y [1,256,48,64]` | `z [1,128,9,12]`, `y [1,256,34,46]` | `z [1,128,6,8]`, `y [1,256,24,32]` | `z [1,128,4,5]`, `y [1,256,16,20]` |
+| `.bin` for the bundled test image | 10 840 B | 7 104 B | 4 306 B | 2 261 B |
+| PSNR vs the 2K source | 30.10 dB | 28.94 dB | 26.65 dB | 23.61 dB |
+
+(Model files are `aeic_se_ft2_encoder_<W>x<H>.onnx`. PSNR is measured after the decoder
+upscales back to 2048×1536.)
+
+Model canvases have to be **multiples of 64**. The decoder derives the latent grid as
+`ceil(H/64)*2 × ceil(W/64)*2`, and any other size desyncs the rANS stream. 640×480 and
+1440×1080 aren't multiples of 64, so the encoder resizes the image to the content size,
+edge-replicates it right/bottom up to the model canvas, and stores `contentW/contentH` in the
+sidecar. The decoder then crops the padding off.
 
 Everything else is shared and unchanged: the same `aeic_ft2_cdf.bin` entropy tables, the same
 pure-Python rANS step, and the **same decoder with no flag** — `decode.py` reads the canvas from
 the `.bin` header (`[uint32 H][uint32 W][uint32 len]`) and derives the latent grid from it, then
-upscales back to the original resolution recorded in the sidecar. A `-hd` `.bin` is therefore a
-normal AEIC bitstream; nothing downstream needs to know which canvas produced it.
+upscales back to the original resolution recorded in the sidecar. A `.bin` from any canvas is
+therefore a normal AEIC bitstream; nothing downstream needs to know which canvas produced it.
 
-Both ONNX files are committed here, so nothing needs exporting to use the codec. Adding a
-*third* canvas would mean re-running the project's ONNX export script (`export_onnx_full.py H W`
-in the upstream AEIC tree, which needs the `AEIC_SE_ft2.pkl` training checkpoint) — that script
-and checkpoint are **not** part of this repo. Only ONNX exports exist for `-hd`; the Android
-app's TFLite model is still 2048x1536 only.
+All four ONNX files are committed here, so nothing needs exporting to use the codec. Adding
+another canvas would mean re-running the project's ONNX export script (`export_onnx_full.py H W`,
+sides multiples of 64, in the upstream AEIC tree, which needs the `AEIC_SE_ft2.pkl` training
+checkpoint) — that script and checkpoint are **not** part of this repo. Only ONNX exports exist
+for `-fhd`/`-hd`/`-sd`; the Android app's TFLite model is still 2048x1536 only.
 
 The rANS step is **pure Python (numpy only)** — it reads `aeic_ft2_cdf.bin` and is
 **byte-identical** to the project's reference encoder and the Android app's output (verified).
@@ -63,7 +79,9 @@ This codec is split across two machines. The encoder (this folder) runs on the *
 | File | What |
 |------|------|
 | `aeic_se_ft2_encoder_2048x1536.onnx` (87 MB) | The encoder, ONNX — default canvas. |
+| `aeic_se_ft2_encoder_1472x1088.onnx` (76 MB) | Same encoder exported for `-fhd` (1440×1080 content). |
 | `aeic_se_ft2_encoder_1024x768.onnx` (70 MB) | Same encoder exported for the `-hd` canvas. |
+| `aeic_se_ft2_encoder_640x512.onnx` (67 MB) | Same encoder exported for `-sd` (640×480 content). |
 | `aeic_se_ft2_encoder_2048x1536.tflite` (87 MB) | Same encoder, TFLite/LiteRT (also serves the GPU delegate). |
 | `aeic_ft2_cdf.bin` (0.8 MB) | Entropy tables — needed for the rANS step (and by the Android app). |
 | `run_onnx_npy.py` | Runs the model + rANS → prints the 9 tensors and writes the `.bin`. |
@@ -71,7 +89,7 @@ This codec is split across two machines. The encoder (this folder) runs on the *
 
 Input images live in `../original/` (e.g. the provided `input_2048x1536.png`/`.npy`). Both
 models are **fixed-shape** and take a **single input** — no `group_map`, nothing else to build.
-`-hd` just swaps in the 1024×768 export of the same weights.
+`-fhd`/`-hd`/`-sd` just swap in a different-size export of the same weights.
 
 ## Which scenario are you running? (IMPORTANT — pick one)
 
@@ -83,12 +101,12 @@ models are **fixed-shape** and take a **single input** — no `group_map`, nothi
 **Scenario 2 — a phone app:** the Android encoder app is **not part of this repo**. It needs
 the same three asset files you see here (`*.onnx`, the matching `*.tflite`, and
 `aeic_ft2_cdf.bin`) in `app/src/main/assets/`, and it preprocesses raw images itself. Only the
-2048x1536 TFLite export exists; there is no `-hd` TFLite yet.
+2048x1536 TFLite export exists; there is no `-fhd`/`-hd`/`-sd` TFLite yet.
 
 ## Input contract (what the model expects)
 
-- **Shape:** `[1, 3, 1536, 2048]`  (NCHW: batch 1, RGB, H=1536, W=2048) — with `-hd`:
-  `[1, 3, 768, 1024]`
+- **Shape:** `[1, 3, 1536, 2048]`  (NCHW: batch 1, RGB, H=1536, W=2048). With `-fhd`:
+  `[1, 3, 1088, 1472]`, `-hd`: `[1, 3, 768, 1024]`, `-sd`: `[1, 3, 512, 640]`
 - **dtype:** `float32`
 - **Value range:** `[0.0, 1.0]`  (i.e. pixel/255)
 - **Normalization is inside the model** — do NOT subtract mean / divide by std yourself.
@@ -121,7 +139,7 @@ Both routes produce a **bit-identical** tensor (verified, max diff = 0.0).
 ## Output
 
 **Model:** 9 tensors (the quantized latents + entropy params): one `z` `[1,128,12,16]` and
-eight `[1,256,48,64]` (with `-hd`: `z` `[1,128,6,8]` and eight `[1,256,24,32]`). A successful
+eight `[1,256,48,64]` (other canvases: see the [Canvases](#canvases) table). A successful
 run that returns these shapes = the model ran fine.
 
 **Compressed file (`run_onnx_npy.py`):** after the model, the script entropy-codes those 9

@@ -29,7 +29,7 @@ docker run --rm --gpus all \
   -v "$(pwd)/encoded:/app/encoded" \
   -v "$(pwd)/decoded:/app/decoded" \
   -v "$(pwd)/decoder/weights:/app/decoder/weights:ro" \
-  aeic-codec ./roundtrip.sh input_2048x1536.png        # add -hd for the 1024x768 canvas
+  aeic-codec ./roundtrip.sh input_2048x1536.png        # add -fhd / -hd / -sd for a smaller canvas
 ```
 
 ## Encode only (CPU, no GPU or weights needed)
